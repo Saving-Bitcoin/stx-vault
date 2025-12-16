@@ -120,6 +120,7 @@
       (vault-info (unwrap! (map-get? user-vault tx-sender) ERR_NO_FUNDS))
       (user-balance (get balance vault-info))
       (unlock-time (get unlock-block vault-info))
+      (recipient tx-sender)
     )
     (begin
       ;; 1. Authorization: Ensure caller has funds
@@ -128,13 +129,13 @@
       ;; 2. Timelock Check: Assert that the unlock block has been reached
       (asserts! (>= current-block unlock-time) ERR_TOO_EARLY)
 
-      ;; 3. Token Transfer: Transfer STX from contract back to user
-      (try! (as-contract (stx-transfer? user-balance tx-sender contract-caller)))
-
-      ;; 4. Clear Storage
+      ;; 3. Clear Storage BEFORE transfer to prevent reentrancy
       (map-set user-vault tx-sender
         {balance: u0, unlock-block: u0}
       )
+
+      ;; 4. Token Transfer: Transfer STX from contract back to user
+      (try! (as-contract (stx-transfer? user-balance tx-sender recipient)))
 
       (ok user-balance)
     )
