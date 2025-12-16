@@ -40,7 +40,7 @@
   principal
   {
     balance: uint,
-    "unlock-block": uint
+    unlock-block: uint
   }
 )
 
@@ -62,10 +62,12 @@
 (define-public (decrement)
   (let 
     ((current-value (var-get counter)))
-    ;; Prevent underflow
-    (asserts! (> current-value u0) ERR_UNDERFLOW)
-    (var-set counter (- current-value u1))
-    (ok (var-get counter))
+    (begin
+      ;; Prevent underflow
+      (asserts! (> current-value u0) ERR_UNDERFLOW)
+      (var-set counter (- current-value u1))
+      (ok (var-get counter))
+    )
   )
 )
 
@@ -74,65 +76,68 @@
 (define-public (deposit (amount uint) (unlock-block uint))
   (let (
       (current-block block-height)
-      (user-data (map-get? user-vault contract-caller))
+      (user-data (map-get? user-vault tx-sender))
       (vault-info
         (match user-data
-          ;; If user already has a vault, load existing data
           val val
-          ;; Otherwise, create new data
-          {balance: u0, "unlock-block": u0}
+          {balance: u0, unlock-block: u0}
         )
       )
       (new-balance (+ (get balance vault-info) amount))
     )
+    (begin
+      ;; 1. Input Validation: Check if the unlock block is in the future
+      (asserts! (> unlock-block current-block) ERR_INVALID_BLOCK)
 
-    ;; 1. Input Validation: Check if the unlock block is in the future (min +1 block)
-    (asserts! (> unlock-block current-block) ERR_INVALID_BLOCK)
+      ;; 2. Token Transfer: Transfer STX from user to this contract
+      (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
 
-    ;; 2. Token Transfer: Transfer STX from user to this contract
-    (try! (stx-transfer? amount contract-caller (as-contract tx-sender)))
+      ;; 3. Update Storage
+      (map-set user-vault tx-sender
+        {
+          balance: new-balance,
+          unlock-block: 
+            (if (is-eq (get unlock-block vault-info) u0)
+              ;; If first deposit, use new unlock-block
+              unlock-block
+              ;; If subsequent deposit, ensure new lock is not earlier than old lock
+              (if (> unlock-block (get unlock-block vault-info))
+                unlock-block
+                (get unlock-block vault-info)
+              )
+            )
+        }
+      )
 
-    ;; 3. Update Storage
-    (map-set user-vault contract-caller
-      {
-        balance: new-balance,
-        "unlock-block": 
-          (if (is-eq (get "unlock-block" vault-info) u0)
-            ;; If first deposit, use new unlock-block
-            unlock-block
-            ;; If subsequent deposit, ensure new lock is not earlier than old lock
-            (max unlock-block (get "unlock-block" vault-info))
-          )
-      }
+      (ok true)
     )
-
-    (ok true)
   )
 )
 
 (define-public (withdraw)
   (let (
       (current-block block-height)
-      (vault-info (unwrap! (map-get? user-vault contract-caller) ERR_NO_FUNDS))
+      (vault-info (unwrap! (map-get? user-vault tx-sender) ERR_NO_FUNDS))
       (user-balance (get balance vault-info))
-      (unlock-time (get "unlock-block" vault-info))
+      (unlock-time (get unlock-block vault-info))
     )
+    (begin
+      ;; 1. Authorization: Ensure caller has funds
+      (asserts! (> user-balance u0) ERR_NO_FUNDS)
 
-    ;; 1. Authorization: Ensure caller has funds
-    (asserts! (> user-balance u0) ERR_NO_FUNDS)
+      ;; 2. Timelock Check: Assert that the unlock block has been reached
+      (asserts! (>= current-block unlock-time) ERR_TOO_EARLY)
 
-    ;; 2. Timelock Check: Assert that the unlock block has been reached
-    (asserts! (>= current-block unlock-time) ERR_TOO_EARLY)
+      ;; 3. Token Transfer: Transfer STX from contract back to user
+      (try! (as-contract (stx-transfer? user-balance tx-sender contract-caller)))
 
-    ;; 3. Token Transfer: Transfer STX from contract back to user
-    (try! (as-contract (stx-transfer? user-balance tx-sender contract-caller)))
+      ;; 4. Clear Storage
+      (map-set user-vault tx-sender
+        {balance: u0, unlock-block: u0}
+      )
 
-    ;; 4. Clear Storage
-    (map-set user-vault contract-caller
-      {balance: u0, "unlock-block": u0}
+      (ok user-balance)
     )
-
-    (ok user-balance)
   )
 )
 
@@ -155,7 +160,7 @@
   (match (map-get? user-vault user)
     val (ok val)
     ;; Return a zeroed-out vault if no data is found
-    none (ok {balance: u0, "unlock-block": u0})
+    (ok {balance: u0, unlock-block: u0})
   )
 )
 
