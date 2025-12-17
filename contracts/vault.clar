@@ -52,21 +52,37 @@
 
 ;; Public function to increment the counter
 (define-public (increment)
-  (begin
-    (var-set counter (+ (var-get counter) u1))
-    (ok (var-get counter))
+  (let
+    ((new-value (+ (var-get counter) u1)))
+    (begin
+      (var-set counter new-value)
+      (print {
+        event: "counter-incremented",
+        caller: tx-sender,
+        new-value: new-value,
+        block-height: block-height
+      })
+      (ok new-value)
+    )
   )
 )
 
 ;; Public function to decrement the counter
 (define-public (decrement)
   (let 
-    ((current-value (var-get counter)))
+    ((current-value (var-get counter))
+     (new-value (- current-value u1)))
     (begin
       ;; Prevent underflow
       (asserts! (> current-value u0) ERR_UNDERFLOW)
-      (var-set counter (- current-value u1))
-      (ok (var-get counter))
+      (var-set counter new-value)
+      (print {
+        event: "counter-decremented",
+        caller: tx-sender,
+        new-value: new-value,
+        block-height: block-height
+      })
+      (ok new-value)
     )
   )
 )
@@ -84,6 +100,17 @@
         )
       )
       (new-balance (+ (get balance vault-info) amount))
+      (final-unlock-block
+        (if (is-eq (get unlock-block vault-info) u0)
+          ;; If first deposit, use new unlock-block
+          unlock-block
+          ;; If subsequent deposit, ensure new lock is not earlier than old lock
+          (if (> unlock-block (get unlock-block vault-info))
+            unlock-block
+            (get unlock-block vault-info)
+          )
+        )
+      )
     )
     (begin
       ;; 1. Input Validation: Check if the unlock block is in the future
@@ -96,18 +123,19 @@
       (map-set user-vault tx-sender
         {
           balance: new-balance,
-          unlock-block: 
-            (if (is-eq (get unlock-block vault-info) u0)
-              ;; If first deposit, use new unlock-block
-              unlock-block
-              ;; If subsequent deposit, ensure new lock is not earlier than old lock
-              (if (> unlock-block (get unlock-block vault-info))
-                unlock-block
-                (get unlock-block vault-info)
-              )
-            )
+          unlock-block: final-unlock-block
         }
       )
+
+      ;; 4. Emit Event
+      (print {
+        event: "deposit",
+        user: tx-sender,
+        amount: amount,
+        new-balance: new-balance,
+        unlock-block: final-unlock-block,
+        current-block: current-block
+      })
 
       (ok true)
     )
@@ -136,6 +164,15 @@
 
       ;; 4. Token Transfer: Transfer STX from contract back to user
       (try! (as-contract (stx-transfer? user-balance tx-sender recipient)))
+
+      ;; 5. Emit Event
+      (print {
+        event: "withdraw",
+        user: tx-sender,
+        amount: user-balance,
+        unlock-block: unlock-time,
+        current-block: current-block
+      })
 
       (ok user-balance)
     )
