@@ -70,19 +70,23 @@
 ;; Public function to decrement the counter
 (define-public (decrement)
   (let 
-    ((current-value (var-get counter))
-     (new-value (- current-value u1)))
+    ((current-value (var-get counter)))
     (begin
       ;; Prevent underflow
       (asserts! (> current-value u0) ERR_UNDERFLOW)
-      (var-set counter new-value)
-      (print {
-        event: "counter-decremented",
-        caller: tx-sender,
-        new-value: new-value,
-        block-height: block-height
-      })
-      (ok new-value)
+      (let
+        ((new-value (- current-value u1)))
+        (begin
+          (var-set counter new-value)
+          (print {
+            event: "counter-decremented",
+            caller: tx-sender,
+            new-value: new-value,
+            block-height: block-height
+          })
+          (ok new-value)
+        )
+      )
     )
   )
 )

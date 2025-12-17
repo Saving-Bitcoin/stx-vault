@@ -1,6 +1,6 @@
 ---
 id: 0
-name: Mainnet deployment
+name: Mainnet deployment - vault-v2
 network: mainnet
 stacks-node: "https://api.hiro.so"
 bitcoin-node: "http://blockstack:blockstacksystem@bitcoin.blockstack.com:8332"
@@ -9,17 +9,11 @@ plan:
     - id: 0
       transactions:
         - contract-publish:
-            contract-name: vault
-            expected-sender: SP1WEKNK5SGNTYM0J8M34FMBM7PTRJSYRWY9C1CGR
-            cost: 471599
-            path: contracts/vault.clar
-            anchor-block-only: true
-            clarity-version: 2
-        - contract-publish:
             contract-name: vault-v2
             expected-sender: SP1WEKNK5SGNTYM0J8M34FMBM7PTRJSYRWY9C1CGR
-            cost: 471599
+            cost: 44720
             path: contracts/vault.clar
             anchor-block-only: true
             clarity-version: 2
       epoch: "3.0"
+

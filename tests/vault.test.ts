@@ -18,6 +18,32 @@ describe("Counter Functions Tests", () => {
     expect(incrementResponse.result).toBeOk(Cl.uint(1));
   });
 
+  it("emits event when incrementing counter", () => {
+    const currentBlock = simnet.blockHeight;
+    const incrementResponse = simnet.callPublicFn(
+      "vault",
+      "increment",
+      [],
+      deployer
+    );
+
+    expect(incrementResponse.result).toBeOk(Cl.uint(1));
+
+    // Check for print event
+    const printEvents = incrementResponse.events.filter(
+      (e) => e.event === "print_event"
+    );
+    expect(printEvents).toHaveLength(1);
+    expect(printEvents[0].data.value).toStrictEqual(
+      Cl.tuple({
+        event: Cl.stringAscii("counter-incremented"),
+        caller: Cl.principal(deployer),
+        "new-value": Cl.uint(1),
+        "block-height": Cl.uint(currentBlock),
+      })
+    );
+  });
+
   it("allows multiple increments", () => {
     simnet.callPublicFn("vault", "increment", [], deployer);
     simnet.callPublicFn("vault", "increment", [], deployer);
@@ -43,6 +69,32 @@ describe("Counter Functions Tests", () => {
     );
 
     expect(decrementResponse.result).toBeOk(Cl.uint(1));
+  });
+
+  it("emits event when decrementing counter", () => {
+    simnet.callPublicFn("vault", "increment", [], deployer);
+    simnet.callPublicFn("vault", "increment", [], deployer);
+
+    const decrementResponse = simnet.callPublicFn(
+      "vault",
+      "decrement",
+      [],
+      deployer
+    );
+
+    expect(decrementResponse.result).toBeOk(Cl.uint(1));
+
+    // Check for print event
+    const printEvents = decrementResponse.events.filter(
+      (e) => e.event === "print_event"
+    );
+    expect(printEvents).toHaveLength(1);
+
+    const eventData = printEvents[0].data.value as any;
+    expect(eventData.value.event.value).toBe("counter-decremented");
+    expect(eventData.value.caller.value).toBe(deployer);
+    expect(eventData.value["new-value"].value).toBe(1n);
+    expect(eventData.value["block-height"].type).toBe("uint");
   });
 
   it("prevents underflow when decrementing at zero", () => {
@@ -86,13 +138,48 @@ describe("Vault Deposit Tests", () => {
     );
 
     expect(depositResponse.result).toBeOk(Cl.bool(true));
-    expect(depositResponse.events).toHaveLength(1);
-    expect(depositResponse.events[0].event).toBe("stx_transfer_event");
-    expect(depositResponse.events[0].data).toMatchObject({
+
+    // Check STX transfer event
+    const stxEvents = depositResponse.events.filter(
+      (e) => e.event === "stx_transfer_event"
+    );
+    expect(stxEvents).toHaveLength(1);
+    expect(stxEvents[0].data).toMatchObject({
       amount: amount.toString(),
       sender: wallet1,
       recipient: `${deployer}.vault`,
     });
+  });
+
+  it("emits event when depositing to vault", () => {
+    const amount = 1000;
+    const currentBlock = simnet.blockHeight;
+    const unlockBlock = currentBlock + 10;
+
+    const depositResponse = simnet.callPublicFn(
+      "vault",
+      "deposit",
+      [Cl.uint(amount), Cl.uint(unlockBlock)],
+      wallet1
+    );
+
+    expect(depositResponse.result).toBeOk(Cl.bool(true));
+
+    // Check for print event
+    const printEvents = depositResponse.events.filter(
+      (e) => e.event === "print_event"
+    );
+    expect(printEvents).toHaveLength(1);
+    expect(printEvents[0].data.value).toStrictEqual(
+      Cl.tuple({
+        event: Cl.stringAscii("deposit"),
+        user: Cl.principal(wallet1),
+        amount: Cl.uint(amount),
+        "new-balance": Cl.uint(amount),
+        "unlock-block": Cl.uint(unlockBlock),
+        "current-block": Cl.uint(currentBlock),
+      })
+    );
   });
 
   it("rejects deposit with unlock block in the past", () => {
@@ -162,6 +249,45 @@ describe("Vault Deposit Tests", () => {
       Cl.tuple({
         balance: Cl.uint(amount1 + amount2),
         "unlock-block": Cl.uint(unlockBlock + 5),
+      })
+    );
+  });
+
+  it("emits correct event for multiple deposits with updated balance", () => {
+    const amount1 = 1000;
+    const amount2 = 500;
+    const currentBlock = simnet.blockHeight;
+    const unlockBlock = currentBlock + 10;
+
+    // First deposit
+    simnet.callPublicFn(
+      "vault",
+      "deposit",
+      [Cl.uint(amount1), Cl.uint(unlockBlock)],
+      wallet1
+    );
+
+    // Second deposit - get current block before the transaction
+    const depositResponse2 = simnet.callPublicFn(
+      "vault",
+      "deposit",
+      [Cl.uint(amount2), Cl.uint(unlockBlock + 5)],
+      wallet1
+    );
+
+    // Check second deposit emits event with accumulated balance
+    const printEvents = depositResponse2.events.filter(
+      (e) => e.event === "print_event"
+    );
+    expect(printEvents).toHaveLength(1);
+    expect(printEvents[0].data.value).toStrictEqual(
+      Cl.tuple({
+        event: Cl.stringAscii("deposit"),
+        user: Cl.principal(wallet1),
+        amount: Cl.uint(amount2),
+        "new-balance": Cl.uint(amount1 + amount2),
+        "unlock-block": Cl.uint(unlockBlock + 5),
+        "current-block": Cl.uint(currentBlock),
       })
     );
   });
@@ -310,13 +436,57 @@ describe("Vault Withdrawal Tests", () => {
     );
 
     expect(withdrawResponse.result).toBeOk(Cl.uint(amount));
-    expect(withdrawResponse.events).toHaveLength(1);
-    expect(withdrawResponse.events[0].event).toBe("stx_transfer_event");
-    expect(withdrawResponse.events[0].data).toMatchObject({
+
+    // Check STX transfer event
+    const stxEvents = withdrawResponse.events.filter(
+      (e) => e.event === "stx_transfer_event"
+    );
+    expect(stxEvents).toHaveLength(1);
+    expect(stxEvents[0].data).toMatchObject({
       amount: amount.toString(),
       sender: `${deployer}.vault`,
       recipient: wallet1,
     });
+  });
+
+  it("emits event when withdrawing from vault", () => {
+    const amount = 1000;
+    const currentBlock = simnet.blockHeight;
+    const unlockBlock = currentBlock + 10;
+
+    simnet.callPublicFn(
+      "vault",
+      "deposit",
+      [Cl.uint(amount), Cl.uint(unlockBlock)],
+      wallet1
+    );
+
+    // Advance to unlock block
+    simnet.mineEmptyBlocks(10);
+
+    const withdrawResponse = simnet.callPublicFn(
+      "vault",
+      "withdraw",
+      [],
+      wallet1
+    );
+
+    expect(withdrawResponse.result).toBeOk(Cl.uint(amount));
+
+    // Check for print event
+    const printEvents = withdrawResponse.events.filter(
+      (e) => e.event === "print_event"
+    );
+    expect(printEvents).toHaveLength(1);
+    expect(printEvents[0].data.value).toStrictEqual(
+      Cl.tuple({
+        event: Cl.stringAscii("withdraw"),
+        user: Cl.principal(wallet1),
+        amount: Cl.uint(amount),
+        "unlock-block": Cl.uint(unlockBlock),
+        "current-block": Cl.uint(currentBlock + 10),
+      })
+    );
   });
 
   it("prevents withdrawal before unlock block is reached", () => {
@@ -575,7 +745,12 @@ describe("Integration Tests", () => {
     expect(withdraw1.result).toBeOk(Cl.uint(amount1));
 
     // User 2 cannot withdraw yet
-    const withdraw2Early = simnet.callPublicFn("vault", "withdraw", [], wallet2);
+    const withdraw2Early = simnet.callPublicFn(
+      "vault",
+      "withdraw",
+      [],
+      wallet2
+    );
     expect(withdraw2Early.result).toBeErr(Cl.uint(103));
 
     // Advance to user 2's unlock block

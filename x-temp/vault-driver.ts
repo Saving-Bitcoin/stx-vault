@@ -61,7 +61,7 @@ type NetworkSettings = {
 };
 
 const CONTRACT_ADDRESS = "SP1WEKNK5SGNTYM0J8M34FMBM7PTRJSYRWY9C1CGR";
-const CONTRACT_NAME = "vault";
+const CONTRACT_NAME = "vault-v2"; // Updated to use new version with events
 
 // Function names in vault.clar
 const FN_INCREMENT = "increment";
